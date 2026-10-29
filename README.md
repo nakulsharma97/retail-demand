@@ -11,7 +11,7 @@
 
 > **An end-to-end machine learning system for predicting weekly product demand across multiple retail stores — built with XGBoost, Facebook Prophet, PyTorch LSTM, MLflow, FastAPI, and Streamlit.**
 
-**Author:** Mohit Sai Sekharamahanthi | [GitHub](https://github.com/DataStatsMohith)
+**Author:** Nakul Sharma | [GitHub](https://github.com/nakulsharma97)
 
 ---
 
@@ -21,6 +21,8 @@ Retail chains operating hundreds of stores and thousands of SKUs face a critical
 
 Too little stock = lost sales and unhappy customers (stockouts).  
 Too much stock = wasted capital, markdowns, and spoilage (overstock).
+
+The dataset models a Boots-style UK retailer: **8 stores, 23 SKUs across 5 categories** (Skincare, Haircare, Pharmacy, Beauty, Baby) and **2 years of daily sales**, with category seasonality, promotions and UK bank holidays built in.
 
 This project builds a production-grade demand forecasting system that:
 - Predicts weekly sales per store per SKU with machine learning
@@ -34,13 +36,30 @@ This project builds a production-grade demand forecasting system that:
 
 ## Results
 
+Measured on the 8-week hold-out set (1,472 rows). These are the executed outputs of notebooks 04 and 05 — not targets.
+
 | Model | MAE | MAPE | vs Baseline |
 |-------|-----|------|-------------|
-| Naive Baseline (Moving Avg) | ~35 | ~28% | - |
-| Facebook Prophet | ~22 | ~18% | -36% |
-| **XGBoost (Production)** | **~20** | **~16%** | **-43%** |
+| Naive Baseline (4-week moving average) | 37.24 | 28.8% | - |
+| **XGBoost (Production)** | **31.73** | **26.0%** | **-14.8% MAE** |
+| Prophet (single store-SKU demo — S001/SKU0001) | 38.28 | not reported | not comparable |
 
-**Business impact:** A 43% reduction in forecast error translates to significantly lower stockout and overstock costs across the store network.
+Full test-set evaluation (notebook 05):
+
+| Metric | Value |
+|--------|-------|
+| MAE | 31.05 units |
+| RMSE | 53.21 units |
+| MAPE | 25.7% |
+| wMAPE | 16.0% |
+| Bias | +25.64 units (systematic over-forecast) |
+| Stockout risk | 2.2% of weeks (target < 5%) |
+| Overstock risk | 23.0% of weeks (target < 15%) |
+| Forecasts within 10% of actual | 56.1% of weeks |
+
+**Business impact:** XGBoost cuts MAE by ~15% versus the moving-average baseline, and notebook 05 models the resulting stockout/overstock improvement at roughly **£3.7M per year** under its stated assumptions (13% → 2.2% stockout risk). Overstock risk is still above target because the model over-forecasts, which is the next thing to fix.
+
+> **Note:** the KPI tiles in the dashboard and the hard-coded `/model/metrics` response show demo values (MAPE 11.3%, stockout 7.2%, overstock 14.1%). The measured figures are the ones in this section.
 
 ---
 
@@ -115,11 +134,11 @@ This project builds a production-grade demand forecasting system that:
 ## Project Structure
 
 ```
-retail-demand-forecasting-ml/
+retail-demand/
 │
-├── data/
-│   ├── raw/                    # Synthetic multi-store sales data
-│   └── processed/              # Cleaned, feature-engineered datasets
+├── data/                       # Generated locally by the Quick Start, not committed
+│   ├── raw/                    # stores.csv, products.csv, sales.csv + boots_retail.db (SQLite)
+│   └── processed/              # train/test/weekly_master, featured, predictions, customer_segments
 │
 ├── notebooks/
 │   ├── 01_EDA.ipynb                    # Exploratory Data Analysis
@@ -135,11 +154,12 @@ retail-demand-forecasting-ml/
 │   ├── evaluation/     # Metrics & SHAP explainability
 │   └── pipeline/       # End-to-end train & predict pipelines
 │
-├── api/                # FastAPI REST endpoint
+├── api/                # FastAPI app, pydantic schemas, API-only requirements
 ├── dashboard/          # Streamlit interactive dashboard
-├── mlops/              # MLflow tracking & Docker deployment
-├── sql/                # Database schema & analytical queries
-└── tests/              # Unit tests
+├── docs/               # architecture.md, results_summary.md + exported figures
+├── mlops/              # MLflow tracking, model registry, Dockerfile + docker-compose
+├── sql/                # create_tables.sql, aggregation_queries.sql, feature_queries.sql
+└── tests/              # Unit tests (API, data, metrics)
 ```
 
 ---
@@ -148,7 +168,7 @@ retail-demand-forecasting-ml/
 
 | Layer | Technology |
 |-------|-----------|
-| **Language** | Python 3.13 |
+| **Language** | Python 3.13 (the Docker image builds on 3.11-slim) |
 | **ML Models** | XGBoost, Facebook Prophet, PyTorch LSTM |
 | **ML Utilities** | scikit-learn, SHAP, statsmodels |
 | **Data** | pandas, numpy, SQLite (SQLAlchemy) |
@@ -165,12 +185,16 @@ retail-demand-forecasting-ml/
 
 ### 1. Clone and install
 ```bash
-git clone https://github.com/DataStatsMohith/retail-demand-forecasting-ml.git
-cd retail-demand-forecasting-ml
+git clone https://github.com/nakulsharma97/retail-demand.git
+cd retail-demand
 pip install -r requirements.txt
 ```
 
+> `requirements.txt` is currently saved as UTF-16, which `pip` cannot parse. Re-save it as UTF-8 (or install from `api/requirements_api.txt` for the API only) if the install fails.
+
 ### 2. Generate data and train
+Data is not committed — this step creates `data/raw`, `data/processed` and `boots_retail.db`.
+
 ```bash
 python src/data/generate_data.py
 python src/data/preprocess.py
@@ -209,10 +233,10 @@ pytest tests/ -v
 | Notebook | Description | Key Output |
 |----------|-------------|------------|
 | [01_EDA](notebooks/01_EDA.ipynb) | Sales trends, seasonality, promotions | 5 charts |
-| [02_Feature_Engineering](notebooks/02_Feature_Engineering.ipynb) | Lag features, rolling stats, correlations | 42-feature matrix |
+| [02_Feature_Engineering](notebooks/02_Feature_Engineering.ipynb) | Lag features, rolling stats, correlations | 42-column feature matrix (9,752 rows) |
 | [03_Customer_Segmentation](notebooks/03_Customer_Segmentation.ipynb) | RFM scoring, KMeans clusters | Store segment map |
-| [04_Demand_Forecasting](notebooks/04_Demand_Forecasting.ipynb) | XGBoost vs Prophet vs Baseline | Model comparison |
-| [05_Model_Evaluation](notebooks/05_Model_Evaluation.ipynb) | Error analysis, business impact in GBP | ROI quantification |
+| [04_Demand_Forecasting](notebooks/04_Demand_Forecasting.ipynb) | XGBoost vs Prophet vs Baseline | 31.73 MAE / 26.0% MAPE vs 37.24 / 28.8% baseline |
+| [05_Model_Evaluation](notebooks/05_Model_Evaluation.ipynb) | Error analysis, business impact in GBP | ~£3.7M annual saving (modelled) |
 
 ---
 
@@ -221,9 +245,11 @@ pytest tests/ -v
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
-| GET | `/stores` | List all stores |
-| POST | `/forecast` | Get demand forecast |
+| GET | `/stores` | List the 8 demo store IDs (`S001`–`S008`) |
+| POST | `/forecast` | Get demand forecast (horizon 1–52 weeks) |
 | GET | `/model/metrics` | Current model performance |
+
+> `/forecast` currently returns a **synthetic demo forecast** generated in `api/app.py`; the MLflow model is not loaded into the API yet. `/model/metrics` returns hard-coded demo KPIs.
 
 **Example request:**
 ```bash
@@ -240,7 +266,8 @@ curl -X POST "http://localhost:8000/forecast" \
   "forecasts": [
     {"week_start": "2026-02-23", "predicted_qty": 87, "lower_bound": 74, "upper_bound": 100}
   ],
-  "model_used": "xgboost_v1.0"
+  "model_used": "xgboost_v1.0",
+  "generated_at": "2026-02-16T10:24:31.204118"
 }
 ```
 
@@ -252,17 +279,21 @@ Production-portable — swap SQLite for PostgreSQL, AWS RDS, or Databricks SQL w
 
 ```sql
 stores    (store_id, store_name, region, store_type, opened_date)
-products  (sku_id, product_name, category, price, cost)
+products  (sku_id, product_name, category, subcategory, price, cost)
 sales     (sale_id, store_id, sku_id, sale_date, quantity, revenue, promotion_flag)
-forecasts (forecast_id, store_id, sku_id, forecast_date, model_name, predicted_qty)
+customers (customer_id, store_id, join_date, age_band, loyalty_tier)
+forecasts (forecast_id, store_id, sku_id, forecast_date, model_name,
+           predicted_qty, lower_bound, upper_bound, created_at)
 ```
+
+Indexed on `sales(sale_date)`, `sales(store_id)` and `sales(sku_id)`, with `store_type` constrained to `pharmacy | beauty | full`.
 
 ---
 
 ## Model Selection Rationale
 
 **Why XGBoost as the production model?**
-- Handles all 42 engineered features simultaneously
+- Handles the full engineered feature matrix (lags, rolling stats, calendar, one-hot categories) in one model
 - Fastest inference at scale (milliseconds per prediction)
 - Built-in feature importance for explainability
 - Native MLflow integration for model tracking
@@ -274,7 +305,7 @@ forecasts (forecast_id, store_id, sku_id, forecast_date, model_name, predicted_q
 
 **Why LSTM?**
 - Captures long-range temporal dependencies
-- Demonstrates deep learning capability (PyTorch)
+- Demonstrates deep learning capability (PyTorch) — implemented in `src/models/lstm_model.py`, but not part of the production training pipeline, which trains XGBoost
 
 ---
 
@@ -287,6 +318,12 @@ The current model shows a train/test gap. In production this would be addressed 
 - Adding external features: weather, local events, competitor pricing
 - Rolling monthly retraining with fresh data
 - Data drift monitoring with automated retraining triggers
+
+---
+
+## Further Documentation
+
+- [docs/architecture.md](docs/architecture.md) — three-layer architecture (data → modelling → serving), cloud-readiness notes and the business KPIs the system optimises
 
 ---
 
